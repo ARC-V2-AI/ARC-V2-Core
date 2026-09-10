@@ -9,7 +9,7 @@
 **System foundation · service-oriented · Linux-native**
 
 ![Status](https://img.shields.io/badge/status-active%20development-orange)
-![Version](https://img.shields.io/badge/version-0.4.0-blue)
+![Version](https://img.shields.io/badge/version-0.5.0-blue)
 ![Python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![Platform](https://img.shields.io/badge/platform-Linux-lightgrey)
 ![uv](https://img.shields.io/badge/tooling-uv-de5fe9)
