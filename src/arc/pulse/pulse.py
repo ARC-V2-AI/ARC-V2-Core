@@ -1,18 +1,23 @@
+from __future__ import annotations
+
 import asyncio
 import logging
 from collections import defaultdict
 
+from arc_service.types import ProcessOutcome, ServiceStatus
+
 from arc.forge.runtime import RuntimeBootstrap, VirtualEnvManager
-from arc.foundation.constants import MAX_UNHEALTHY_SERVICE_CHECKS, WAIT_ON_DEPENDENCIES
+from arc.foundation.constants import (
+    MAX_UNHEALTHY_SERVICE_CHECKS,
+    WAIT_ON_DEPENDENCIES,
+)
 from arc.foundation.service import ServiceState
-from arc.foundation.service_process import ProcessOutcome, ServiceStatus
 from arc.pulse.configLoader import ConfigLoader
 from arc.pulse.manager import ServiceManager
 from arc.pulse.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
 
-# ServiceConfig.restart values this supervisor understands.
 RESTART_ALWAYS = "always"
 RESTART_ON_FAILURE = "on-failure"
 RESTART_NEVER = "never"
@@ -24,108 +29,127 @@ HEALTH_ACTION_STOP = "stop"
 
 class Pulse:
     def __init__(self, autofix: bool) -> None:
-        self._autofix: bool = autofix
-        self._service_registry: ServiceRegistry = ServiceRegistry()
+        self._autofix = autofix
 
-        self._runtime: VirtualEnvManager = VirtualEnvManager()
-        self._service_manager: ServiceManager = ServiceManager(
+        self._service_registry = ServiceRegistry()
+
+        self._runtime = VirtualEnvManager()
+
+        self._service_manager = ServiceManager(
             self._service_registry,
             runtime_python=self._runtime.python,
         )
 
-        self._service_health_counter: defaultdict[int, int] = defaultdict(int)
+        self._service_health_counter: defaultdict[
+            int,
+            int,
+        ] = defaultdict(int)
 
-    async def startup(self, wait_on_deps: bool = WAIT_ON_DEPENDENCIES) -> None:
-        """Start the log relay, build the service registry, and start all services."""
-        # Must start before any service is forked -- the queue it owns is
-        # what gets inherited at fork time.
+    async def startup(
+        self,
+        wait_on_deps: bool = WAIT_ON_DEPENDENCIES,
+    ) -> None:
         RuntimeBootstrap(self._runtime).ensure()
 
         tree = ConfigLoader(self._autofix).run()
+
         self._service_registry.register_tree(tree)
 
         await self._service_manager.start_all(wait_on_deps)
 
-    async def supervise(self, poll_interval: float = 2.0) -> None:
-        """
-        Continuously watch running services and apply each service's
-        restart policy when one exits. Never raises on a single service's
-        behalf -- a crash is handled (logged, possibly restarted), not
-        propagated.
-        """
+    async def supervise(
+        self,
+        poll_interval: float = 2.0,
+    ) -> None:
         while True:
             for service in self._service_registry.iter_startup_order():
-                # if its not running or failed it doesn't have any info
-                if service.state not in (ServiceState.RUNNING, ServiceState.FAILED):
+                if service.state not in (
+                    ServiceState.RUNNING,
+                    ServiceState.FAILED,
+                ):
                     continue
 
-                # check if failed before check
+                # First detect process exit.
                 outcome = self._service_manager.check(service)
-                if outcome:
+
+                if outcome is not None:
                     logger.info(
-                        "Service '%s' exited: %s", service.config.name, outcome.value
+                        "Service '%s' exited: %s",
+                        service.config.name,
+                        outcome.value,
                     )
 
-                    if self._should_restart(service.config.restart, outcome):
-                        logger.info("Restarting service '%s'", service.config.name)
+                    if service.pid is not None:
+                        self._service_health_counter.pop(
+                            service.pid,
+                            None,
+                        )
+
+                    if self._should_restart(
+                        service.config.restart,
+                        outcome,
+                    ):
                         await self._service_manager.restart(service)
 
-                # Perform an internal service health check.
-                if service.pid is None or service.process is None:
                     continue
 
-                _state = await service.process.status()
-                print(_state)
-                _pid = service.pid
+                process = service.process
 
-                if _state is None:
+                if process is None or service.pid is None:
+                    continue
+
+                status: ServiceStatus | None = await process.status()
+
+                if status is None:
                     logger.warning(
-                        f"Could not determine health for service {service.config.name}"
+                        "Could not determine health for service '%s'",
+                        service.config.name,
                     )
                     continue
 
-                # if unhealthy
-                if _state.healthy:
-                    self._service_health_counter[_pid] = 0
-                else:
-                    self._service_health_counter[_pid] += 1
+                pid = service.pid
 
-                _ma = MAX_UNHEALTHY_SERVICE_CHECKS
+                if status.healthy:
+                    self._service_health_counter[pid] = 0
+                    continue
 
-                if self._service_health_counter[_pid] >= _ma:
-                    self._service_health_counter[_pid] = 0
-                    logger.info(
-                        f"Service {service.config.name} was unhealthy for {_ma} times"
-                    )
-                    logger.warning(
-                        f"Service {service.config.name} reports unhealthy: {_state.healthy_reason}"
-                    )
-                    # Restart, Stop or Ignore depending on policy
-                    if self._should_restart_health(service.config.health, _state):
-                        logger.info("Restarting service '%s'", service.config.name)
-                        await self._service_manager.restart(service)
-                    elif service.config.health == HEALTH_ACTION_STOP:
-                        logger.info("Stopping service '%s'", service.config.name)
-                        await self._service_manager.stop(service)
+                self._service_health_counter[pid] += 1
+
+                checks = MAX_UNHEALTHY_SERVICE_CHECKS
+
+                if self._service_health_counter[pid] < checks:
+                    continue
+
+                self._service_health_counter[pid] = 0
+
+                logger.warning(
+                    "Service '%s' reports unhealthy: %s",
+                    service.config.name,
+                    status.healthy_reason,
+                )
+
+                policy = service.config.health
+
+                if policy == HEALTH_ACTION_RESTART:
+                    await self._service_manager.restart(service)
+
+                elif policy == HEALTH_ACTION_STOP:
+                    await self._service_manager.stop(service)
 
             await asyncio.sleep(poll_interval)
 
     @staticmethod
-    def _should_restart(policy: str, outcome: ProcessOutcome) -> bool:
+    def _should_restart(
+        policy: str,
+        outcome: ProcessOutcome,
+    ) -> bool:
         if policy == RESTART_ALWAYS:
             return True
+
         if policy == RESTART_ON_FAILURE:
             return outcome is ProcessOutcome.CRASHED
-        return False  # "never" or anything unrecognized
 
-    @staticmethod
-    def _should_restart_health(policy: str, outcome: ServiceStatus):
-        if policy == HEALTH_ACTION_IGNORE:
-            return False
-        if policy == HEALTH_ACTION_RESTART:
-            return not outcome.healthy
         return False
 
     async def shutdown(self) -> None:
-        """Stop all managed services, then the log relay."""
         await self._service_manager.stop_all()

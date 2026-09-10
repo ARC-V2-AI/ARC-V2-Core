@@ -7,7 +7,6 @@ import signal
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from multiprocessing import get_context
-from multiprocessing.connection import Connection
 from typing import Protocol
 
 from arc_service.types import ProcessOutcome, ProcessResult, ServiceStatus
@@ -74,11 +73,10 @@ class ServiceProcess:
         if self._pid is not None:
             raise RuntimeError(f"Service '{self.name}' is already running")
 
-        # IMPORTANT:
-        # Do NOT call os.path.realpath() here.
+        # DO NOT use os.path.realpath() here.
         #
-        # The venv's python is normally a symlink to the base interpreter.
-        # Resolving that symlink causes Python to lose the venv context.
+        # ~/arc/runtime/bin/python may be a symlink to the base
+        # interpreter. Resolving it can cause the venv to be lost.
         runtime_python = self.runtime_python
 
         if not os.path.isfile(runtime_python):
@@ -93,13 +91,17 @@ class ServiceProcess:
         self._pid = pid
         self.started_at = datetime.now(UTC)
 
-        # Parent keeps these ends.
+        # Parent keeps:
+        #   _control_conn
+        #   _result_conn
+        #
+        # Parent does not need the child-side descriptors.
         self._child_control_conn.close()
         self._child_result_conn.close()
 
     def _exec_child(self, runtime_python: str) -> None:
         try:
-            # The child only keeps the child-side pipe endpoints.
+            # Child keeps the child-side descriptors.
             self._control_conn.close()
             self._result_conn.close()
 
@@ -150,9 +152,7 @@ class ServiceProcess:
                     )
                     return None
 
-                data = self._control_conn.recv_bytes()
-
-                return ServiceStatus.from_bytes(data)
+                return ServiceStatus.from_bytes(self._control_conn.recv_bytes())
 
             except (
                 EOFError,
@@ -168,11 +168,18 @@ class ServiceProcess:
                 return None
 
     def poll_result(self) -> ProcessResult | None:
-        try:
-            if not self._result_conn.poll():
-                return None
+        """
+        Return a runner-reported result if one exists.
 
-            return ProcessResult.from_bytes(self._result_conn.recv_bytes())
+        If the Runner was externally killed, it cannot send a result.
+        In that case waitpid()/the exit code is used to synthesize
+        a ProcessResult.
+        """
+        self._reap()
+
+        try:
+            if self._result_conn.poll():
+                return ProcessResult.from_bytes(self._result_conn.recv_bytes())
 
         except (
             EOFError,
@@ -180,7 +187,32 @@ class ServiceProcess:
             ConnectionResetError,
             OSError,
         ):
+            pass
+
+        # Runner may have died before sending anything.
+        if self._exitcode is None:
             return None
+
+        if self._exitcode < 0:
+            signal_number = -self._exitcode
+
+            return ProcessResult(
+                outcome=ProcessOutcome.CRASHED,
+                error=(
+                    f"Process terminated by signal "
+                    f"{signal_number} ({signal.strsignal(signal_number)})"
+                ),
+            )
+
+        if self._exitcode != 0:
+            return ProcessResult(
+                outcome=ProcessOutcome.CRASHED,
+                error=(f"Process exited with code {self._exitcode}"),
+            )
+
+        return ProcessResult(
+            outcome=ProcessOutcome.STOPPED,
+        )
 
     def is_alive(self) -> bool:
         self._reap()
@@ -197,7 +229,8 @@ class ServiceProcess:
                 os.WNOHANG,
             )
         except ChildProcessError:
-            self._exitcode = 0
+            # The child has already been reaped somewhere else.
+            self._exitcode = 1
             return
 
         if pid == 0:
@@ -205,12 +238,14 @@ class ServiceProcess:
 
         if os.WIFEXITED(status):
             self._exitcode = os.WEXITSTATUS(status)
+            return
 
-        elif os.WIFSIGNALED(status):
+        if os.WIFSIGNALED(status):
             self._exitcode = -os.WTERMSIG(status)
+            return
 
-        else:
-            self._exitcode = status
+        # Defensive fallback.
+        self._exitcode = 1
 
     async def terminate(
         self,
@@ -236,10 +271,8 @@ class ServiceProcess:
 
             await asyncio.sleep(0.1)
 
-        if not self.is_alive():
-            return
-
-        self.kill()
+        if self.is_alive():
+            self.kill()
 
     def kill(self) -> None:
         if not self.is_alive():
@@ -248,12 +281,18 @@ class ServiceProcess:
         assert self._pid is not None
 
         try:
-            os.kill(self._pid, signal.SIGKILL)
+            os.kill(
+                self._pid,
+                signal.SIGKILL,
+            )
         except ProcessLookupError:
             pass
 
         try:
-            os.waitpid(self._pid, 0)
+            os.waitpid(
+                self._pid,
+                0,
+            )
         except ChildProcessError:
             pass
 

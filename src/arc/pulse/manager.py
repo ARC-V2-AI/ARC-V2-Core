@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 
-from arc.foundation.constants import STRICT_ERRORS
+from arc_service.types import ProcessOutcome
+
 from arc.foundation.service import ServiceInstance, ServiceState
-from arc.foundation.service_process import (
-    ProcessOutcome,
-    ServiceProcess,
-)
+from arc.foundation.service_process import ServiceProcess
 from arc.pulse.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
@@ -25,58 +22,16 @@ class ServiceManager:
         self._registry = registry
         self._runtime_python = runtime_python
 
-    def _clear_process(
-        self,
-        service: ServiceInstance,
-    ) -> None:
-        if service.process is not None:
-            service.process.close()
-
-        service.process = None
-        service.pid = None
-
-    async def start_all(
-        self,
-        wait_on_deps: bool = True,
-    ) -> None:
-        for level in self._registry.iter_levels():
-            results = await asyncio.gather(
-                *(self.start(service) for service in level),
-                return_exceptions=True,
-            )
-
-            for service, result in zip(level, results):
-                if isinstance(result, Exception):
-                    logger.exception(
-                        "Failed to start service '%s': %s",
-                        service.config.name,
-                        result,
-                    )
-
-                    if STRICT_ERRORS:
-                        raise result
-
-            if wait_on_deps:
-                results = await asyncio.gather(
-                    *(self.wait_ready(service) for service in level),
-                    return_exceptions=True,
-                )
-
-                for service, result in zip(level, results):
-                    if isinstance(result, Exception):
-                        logger.exception(
-                            "Readiness check failed for '%s': %s",
-                            service.config.name,
-                            result,
-                        )
-
-                        if STRICT_ERRORS:
-                            raise result
-
     async def start(
         self,
         service: ServiceInstance,
     ) -> None:
+        if service.process is not None:
+            if service.process.is_alive():
+                raise RuntimeError(
+                    f"Service '{service.config.name}' is already running"
+                )
+
         service.state = ServiceState.STARTING
 
         try:
@@ -90,108 +45,109 @@ class ServiceManager:
 
             service.process = process
             service.pid = process.pid
-            service.started_at = datetime.now()
+            service.started_at = datetime.now(UTC)
             service.state = ServiceState.RUNNING
 
-        except Exception as exc:
+            logger.info(
+                "Started service '%s' with PID %s",
+                service.config.name,
+                service.pid,
+            )
+
+        except Exception:
             service.state = ServiceState.FAILED
-            service.last_error = str(exc)
 
             logger.exception(
                 "Failed to start service '%s'",
                 service.config.name,
             )
 
-            if STRICT_ERRORS:
-                raise
+            raise
 
     async def wait_ready(
         self,
         service: ServiceInstance,
         timeout: float = 30.0,
-        poll_interval: float = 0.2,
     ) -> None:
-        process = service.process
-
-        if process is None:
+        if service.process is None:
             raise RuntimeError(f"Service '{service.config.name}' has no process")
 
-        deadline = asyncio.get_running_loop().time() + timeout
+        deadline = __import__("asyncio").get_running_loop().time() + timeout
 
         while True:
-            if not process.is_alive():
-                result = process.poll_result()
+            # Detect a dead process before asking it for status.
+            if not service.process.is_alive():
+                result = service.process.poll_result()
 
                 service.state = ServiceState.FAILED
 
                 if result is not None:
-                    service.last_error = result.traceback or result.error
-
-                if STRICT_ERRORS:
-                    raise RuntimeError(
-                        f"Service '{service.config.name}' failed before becoming ready"
+                    logger.error(
+                        "Service '%s' failed before becoming ready: %s",
+                        service.config.name,
+                        result.error or result.outcome.value,
+                    )
+                else:
+                    logger.error(
+                        "Service '%s' failed before becoming ready",
+                        service.config.name,
                     )
 
-                return
+                raise RuntimeError(
+                    f"Service '{service.config.name}' failed before becoming ready"
+                )
 
-            status = await process.status(
-                timeout=0.5,
-            )
+            status = await service.process.status()
 
             if status is not None and status.ready:
                 service.state = ServiceState.READY
+                service.state = ServiceState.RUNNING
+
+                logger.info(
+                    "Service '%s' is ready",
+                    service.config.name,
+                )
                 return
 
-            if asyncio.get_running_loop().time() >= deadline:
-                message = (
+            if __import__("asyncio").get_running_loop().time() >= deadline:
+                raise TimeoutError(
                     f"Service '{service.config.name}' "
-                    f"did not become ready within {timeout}s"
+                    "did not become ready within {timeout} seconds"
                 )
 
-                service.state = ServiceState.FAILED
-                service.last_error = message
+            await __import__("asyncio").sleep(0.1)
 
-                if STRICT_ERRORS:
-                    raise TimeoutError(message)
+    async def start_all(
+        self,
+        wait_on_deps: bool,
+    ) -> None:
+        import asyncio
 
-                return
+        for level in self._registry.iter_levels():
+            results = await asyncio.gather(
+                *(
+                    self._start_and_wait(
+                        service,
+                        wait_on_deps,
+                    )
+                    for service in level
+                ),
+                return_exceptions=True,
+            )
 
-            await asyncio.sleep(poll_interval)
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
 
-    async def stop(
+    async def _start_and_wait(
         self,
         service: ServiceInstance,
-        timeout: float = 10.0,
+        wait_on_deps: bool,
     ) -> None:
-        process = service.process
-
-        if process is None:
-            return
-
-        if not process.is_alive():
-            self._clear_process(service)
-            service.state = ServiceState.STOPPED
-            return
-
-        service.state = ServiceState.STOPPING
-
-        await asyncio.to_thread(
-            process.terminate,
-            timeout,
-        )
-
-        self._clear_process(service)
-        service.state = ServiceState.STOPPED
-
-    async def restart(
-        self,
-        service: ServiceInstance,
-    ) -> None:
-        await self.stop(service)
-
-        service.restart_count += 1
-
         await self.start(service)
+
+        if wait_on_deps:
+            await self.wait_ready(service)
 
     def check(
         self,
@@ -207,33 +163,79 @@ class ServiceManager:
         if result is None:
             return None
 
-        if result.outcome is ProcessOutcome.CRASHED:
+        if result.outcome is ProcessOutcome.STOPPED:
             service.state = ServiceState.FAILED
 
-            service.last_error = result.traceback or result.error
+        elif result.outcome is ProcessOutcome.CRASHED:
+            service.state = ServiceState.FAILED
+
+            logger.error(
+                "Service '%s' crashed: %s",
+                service.config.name,
+                result.error or "unknown error",
+            )
+
+            if result.traceback:
+                logger.error(
+                    "Service '%s' traceback:\n%s",
+                    service.config.name,
+                    result.traceback,
+                )
+
+        elif result.outcome is ProcessOutcome.CANCELLED:
+            service.state = ServiceState.FAILED
 
         return result.outcome
 
-    @staticmethod
-    def is_running(
+    async def stop(
+        self,
         service: ServiceInstance,
-    ) -> bool:
-        return service.process is not None and service.process.is_alive()
+    ) -> None:
+        process = service.process
+
+        if process is None:
+            return
+
+        service.state = ServiceState.STOPPING
+
+        try:
+            await process.terminate()
+        finally:
+            process.close()
+
+            service.process = None
+            service.pid = None
+            service.state = ServiceState.STOPPED
+
+    async def restart(
+        self,
+        service: ServiceInstance,
+    ) -> None:
+        logger.info(
+            "Restarting service '%s'",
+            service.config.name,
+        )
+
+        process = service.process
+
+        if process is not None:
+            await process.terminate()
+            process.close()
+
+        service.process = None
+        service.pid = None
+        service.state = ServiceState.STOPPED
+
+        await self.start(service)
+
+        await self.wait_ready(service)
 
     async def stop_all(self) -> None:
-        for level in reversed(list(self._registry.iter_levels())):
-            results = await asyncio.gather(
-                *(self.stop(service) for service in level),
-                return_exceptions=True,
-            )
-
-            for service, result in zip(level, results):
-                if isinstance(result, Exception):
-                    logger.exception(
-                        "Failed to stop service '%s': %s",
-                        service.config.name,
-                        result,
-                    )
-
-                    if STRICT_ERRORS:
-                        raise result
+        for service in reversed(list(self._registry.iter_startup_order())):
+            try:
+                await self.stop(service)
+            except Exception:
+                logger.exception(
+                    "Failed to stop service '%s'",
+                    service.config.name,
+                )

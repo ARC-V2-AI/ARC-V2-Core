@@ -14,9 +14,9 @@ from arc.forge.lock_manager import LockFile
 from arc.forge.runtime import RuntimeBootstrap, VirtualEnvManager
 from arc.forge.types import SERVICE_REGISTRY, ResolvedSource, ServiceSpec
 from arc.foundation.constants import (
-    ARC_SERVICE_RUNTIME_CONFIG,
-    ARC_SERVICE_RUNTIME_DIR,
-    ARC_SERVICE_RUNTIME_LOCK,
+    SERVICE_CONFIG,
+    SERVICE_LOCK,
+    SERVICE_RUNTIME_DIR,
 )
 
 
@@ -39,9 +39,9 @@ class Forge:
 
     @classmethod
     def from_env(cls):
-        _runtime = VirtualEnvManager(ARC_SERVICE_RUNTIME_DIR)
-        _lock = LockFile(ARC_SERVICE_RUNTIME_LOCK)
-        return cls(_runtime, _lock, ARC_SERVICE_RUNTIME_CONFIG)
+        _runtime = VirtualEnvManager(SERVICE_RUNTIME_DIR)
+        _lock = LockFile(SERVICE_LOCK)
+        return cls(_runtime, _lock, SERVICE_CONFIG)
 
     # -------------------------------------------------------------------------
     # Source handling
@@ -87,7 +87,7 @@ class Forge:
         )
 
         try:
-            subprocess.run(
+            _ = subprocess.run(
                 [
                     "git",
                     "clone",
@@ -372,7 +372,7 @@ class Forge:
                     sort_keys=False,
                 )
 
-            temporary.replace(self.services_config)
+            _ = temporary.replace(self.services_config)
         except OSError as exc:
             temporary.unlink(missing_ok=True)
             raise ForgeError(f"Could not update service configuration: {exc}") from exc
@@ -387,7 +387,7 @@ class Forge:
         source: ResolvedSource,
         *,
         editable: bool,
-    ) -> dict:
+    ):
         if source.kind == "local":
             source_data = {
                 "type": "path",
@@ -416,7 +416,7 @@ class Forge:
     def _find_locked_service(
         self,
         service_id: str,
-    ) -> dict | None:
+    ):
         data = self.lock.load()
 
         for package in data.get("package", []):
@@ -457,14 +457,14 @@ class Forge:
         try:
             self._register_service(spec)
 
-            self.lock.upsert(
+            self.lock.upsert(  # pyright: ignore[reportUnknownMemberType]
                 self._lock_record(
                     spec,
                     resolved_source,
                     editable=editable,
                 )
             )
-        except Exception:
+        except Exception:  # noqa: TRY203
             # The package is already installed at this point.
             # Do not silently pretend installation failed completely.
             raise

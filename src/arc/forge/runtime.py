@@ -8,7 +8,7 @@ from importlib.metadata import version
 from pathlib import Path
 
 from arc.forge.types import SERVICE_REGISTRY
-from arc.foundation.constants import ARC_SERVICE_RUNTIME_DIR
+from arc.foundation.constants import SERVICE_RUNTIME_DIR
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class VirtualEnvError(RuntimeError):
 class VirtualEnvManager:
     def __init__(
         self,
-        venv_dir: str | Path = ARC_SERVICE_RUNTIME_DIR,
+        venv_dir: str | Path = SERVICE_RUNTIME_DIR,
     ) -> None:
         self.venv_dir = Path(venv_dir).expanduser().resolve()
 

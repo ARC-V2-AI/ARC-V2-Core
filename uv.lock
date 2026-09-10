@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "arc-v2-core"
-version = "0.4.0"
+version = "0.4.1"
 source = { editable = "." }
 dependencies = [
     { name = "arc-v2-service-runner" },
@@ -44,8 +44,8 @@ requires-dist = [
 
 [[package]]
 name = "arc-v2-service-runner"
-version = "0.1.1"
-source = { git = "https://github.com/ARC-V2-AI/service-runner.git#c0826ddc3ca2416189417be3553042dfe85e7977" }
+version = "0.1.2"
+source = { git = "https://github.com/ARC-V2-AI/service-runner.git#f7560772cc41ab42aadb703507a3b3d46306b76c" }
 
 [[package]]
 name = "attrs"

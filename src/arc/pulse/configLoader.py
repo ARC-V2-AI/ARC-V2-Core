@@ -3,7 +3,7 @@ from pathlib import Path
 
 import yaml
 
-from arc.foundation.constants import ARC_SERVICE_RUNTIME_CONFIG
+from arc.foundation.constants import SERVICE_CONFIG
 from arc.foundation.service import ServiceConfig, ServiceNode, ServiceTree
 
 logger = logging.getLogger(__name__)
@@ -15,7 +15,7 @@ class ConfigNotFoundError(FileNotFoundError):
 
 class ConfigLoader:
     def __init__(self, autofix: bool) -> None:
-        self._path: Path = ARC_SERVICE_RUNTIME_CONFIG
+        self._path: Path = SERVICE_CONFIG
         self._autofix: bool = autofix
 
         logger.debug(f"Config loader initialized with path: {self._path}")

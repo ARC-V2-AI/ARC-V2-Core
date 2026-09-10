@@ -1,174 +1,206 @@
 # Environment Variables
 
-> ARC uses environment variables as its primary runtime configuration layer, with `~/arc/.env` providing local values and defaults.
+> ARC Core uses environment variables as its primary configuration input. The global `~/arc/.env` file provides local configuration and defaults.
 
 ## At a glance
 
-|                       |                                                    |
-| --------------------- | -------------------------------------------------- |
-| **Role**              | Runtime configuration                              |
-| **Source**            | OS environment + `~/arc/.env`                      |
-| **Loaded by**         | ARC configuration layer                            |
-| **Override behavior** | Existing environment variables are preserved       |
-| **Provides**          | Paths, logging, runtime, permissions, integrations |
-| **Status**            | Implemented                                        |
+|                       |                                                           |
+| --------------------- | --------------------------------------------------------- |
+| **Role**              | ARC Core runtime configuration                            |
+| **Source**            | OS environment + `~/arc/.env`                             |
+| **Loaded by**         | ARC Core configuration layer                              |
+| **Override behavior** | Existing OS environment variables take precedence         |
+| **Provides**          | Core paths, lifecycle behavior, and logging configuration |
+| **Status**            | Implemented                                               |
 
 ## What it does
 
-Environment variables configure ARC without requiring deployment-specific values to be hard-coded into the application.
+ARC Core reads configuration from the operating-system environment and from:
 
-ARC looks for `~/arc/.env`. The file is loaded before configuration constants are evaluated.
+```text
+~/arc/.env
+```
 
-> [!NOTE]
-> If `~/arc/.env` does not exist, ARC continues using its defined defaults — no error is raised.
+The `.env` file is loaded before configuration constants are evaluated.
+
+If the file does not exist, ARC continues using its built-in defaults.
 
 > [!IMPORTANT]
-> `.env` values **do not** override variables already present in the OS environment. If a variable is set both in the shell and in `.env`, the shell value wins silently. This is a common source of "why isn't my `.env` change taking effect?" confusion — always check `env | grep <VAR>` first.
+> Values already defined in the OS environment are not overwritten by `.env`. ARC uses `override=False`, so the OS environment takes precedence.
 
-Values are read through typed helpers for strings, booleans, integers, floats, and paths.
+Configuration values are exposed through typed helpers for strings, booleans, integers, floats, and paths.
 
 ## Reference
 
-These are the environment variables currently defined by ARC.
+These are the environment variables currently defined by **ARC Core**.
 
 ### System
 
-| Variable            | Default | Purpose                              |
-| ------------------- | ------: | ------------------------------------ |
-| `TERMINAL_NO_COLOR` |     `0` | Disable terminal colors when enabled |
-| `PYTHONUNBUFFERED`  |     `1` | Run Python output without buffering  |
-| `STRICT_ERRORS` | `1` | Raise startup lifecycle errors instead of continuing with failed services |
-| `WAIT_ON_DEPENDENCIES` | `1` | Wait for service dependencies to become ready before starting dependent services |
-| `MAX_UNHEALTHY_SERVICE_CHECKS` | `3` | Number of consecutive unhealthy checks before a service is considered unhealthy |
-### Project directories
+| Variable                       | Default | Purpose                                                                                    |
+| ------------------------------ | ------: | ------------------------------------------------------------------------------------------ |
+| `TERMINAL_NO_COLOR`            |     `0` | Disable terminal colors when enabled.                                                      |
+| `STRICT_ERRORS`                |     `1` | Stop or raise on service lifecycle errors instead of continuing with failed services.      |
+| `WAIT_ON_DEPENDENCIES`         |     `1` | Wait for required service dependencies to become ready before starting dependent services. |
+| `MAX_UNHEALTHY_SERVICE_CHECKS` |     `3` | Number of consecutive unhealthy checks before Pulse applies the configured health policy.  |
 
-| Variable          | Default           | Purpose                                |
-| ----------------- | ------------------ | --------------------------------------- |
-| `ARC_DIR`         | `~/arc`            | Root directory of the ARC installation |
-| `AGENT_WORKSPACE` | `~/arc/workspace`  | Persistent workspace used by the agent |
-| `LLM_MODEL_STORE` | `~/arc/models`     | Directory containing local LLM models  |
+### Core directories and files
 
-### Model management
-
-| Variable   | Default                           | Purpose                                    |
-| ---------- | ---------------------------------- | ------------------------------------------- |
-| `HF_TOKEN` | `YOUR-HUGGINGFACE-TOKEN-OPTIONAL`  | Optional Hugging Face authentication token |
+| Variable              | Default                   | Purpose                                                   |
+| --------------------- | ------------------------- | --------------------------------------------------------- |
+| `ARC_DIR`             | `~/arc`                   | Root directory of the ARC installation.                   |
+| `SERVICE_RUNTIME_DIR` | `~/arc/runtime`           | Python runtime environment used to execute ARC services.  |
+| `SERVICE_LOCK`        | `~/arc/arc.lock`          | Lock file containing resolved service installation state. |
+| `SERVICE_CONFIG`      | `~/arc/services.arc.yaml` | Service configuration consumed by Pulse.                  |
 
 ### Logging
 
-| Variable           |                     Default | Purpose                               |
-| ------------------ | ---------------------------: | -------------------------------------- |
-| `LOG_LEVEL`        |                      `INFO`  | Logging verbosity                     |
-| `LOG_FILE`         | `~/arc/workspace/agent.log`  | Log file path                         |
-| `LOG_CONSOLE`      |                         `1`  | Enable console logging                |
-| `LOG_JSON`         |                         `0`  | Enable JSON-formatted logs            |
-| `LOG_ROTATE`       |                         `1`  | Enable log rotation                   |
-| `LOG_MAX_BYTES`    |                  `10485760`  | Maximum log-file size before rotation |
-| `LOG_BACKUP_COUNT` |                         `2`  | Number of rotated log files to retain |
-
-### Permissions
-
-| Variable          | Default                        | Purpose                               |
-| ----------------- | -------------------------------- | --------------------------------------- |
-| `SANDBOX_ALLOW`   | `READ,WRITE,EXECUTE,NETWORK`   | Operations allowed inside the sandbox |
-| `SANDBOX_CONFIRM` | `DELETE,SYSTEM,INSTALL`        | Operations requiring confirmation     |
-
-### Agent runtime
-
-| Variable                          |                                                                  Default | Purpose                                     |
-| ---------------------------------- | -------------------------------------------------------------------------: | --------------------------------------------- |
-| `EXTRACTOR_INPUT_TOKEN_THRESHOLD` |                                                                    `150`  | Token threshold used by the input extractor |
-| `ARC_RUNTIME_PORT`                |                                                                   `7842`  | Runtime server port                         |
-| `ARC_RUNTIME_DEBUG`               |                                                                      `1`  | Enable runtime debug mode                   |
-| `ARC_RUNTIME_MODEL_PATH`          | `/home/paul/arc/models/unsloth__Qwen3.5-4B-GGUF/Qwen3.5-4B-Q4_K_M.gguf`  | Path to the runtime model                   |
-| `ARC_RUNTIME_N_GPU_LAYERS`        |                                                                   `auto`  | Number of model layers assigned to the GPU  |
-| `ARC_RUNTIME_N_THREADS`           |                                                                   `None`  | CPU thread configuration                    |
-| `ARC_RUNTIME_N_CTX`               |                                                                   `4096`  | Model context size                          |
-| `ARC_RUNTIME_N_BATCH`             |                                                                    `256`  | Inference batch size                        |
-| `ARC_RUNTIME_EMBEDDING_POOLING`   |                                                            `unspecified` | Embedding pooling configuration             |
-| `ARC_RUNTIME_GEN_TIMEOUT_S`       |                                                                  `120.0`  | Generation timeout in seconds               |
-| `ARC_RUNTIME_VERBOSE`             |                                                                      `0`  | Enable verbose runtime output               |
-
-### Telegram
-
-| Variable             | Default            | Purpose                           |
-| -------------------- | -------------------- | ----------------------------------- |
-| `TELEGRAM_ENABLED`   | `0`                 | Enable Telegram integration       |
-| `TELEGRAM_BOT_TOKEN` | `YOUR-BOT-TOKEN`    | Telegram bot authentication token |
+| Variable           |                   Default | Purpose                                |
+| ------------------ | ------------------------: | -------------------------------------- |
+| `LOG_LEVEL`        |                    `INFO` | Logging verbosity.                     |
+| `LOG_FILE`         | `~/arc/arc.log` | ARC Core log file.                     |
+| `LOG_CONSOLE`      |                       `1` | Enable console logging.                |
+| `LOG_JSON`         |                       `0` | Enable JSON-formatted logs.            |
+| `LOG_ROTATE`       |                       `1` | Enable log rotation.                   |
+| `LOG_MAX_BYTES`    |                `10485760` | Maximum log-file size before rotation. |
+| `LOG_BACKUP_COUNT` |                       `2` | Number of rotated log files to retain. |
 
 ## Example
 
-A typical local `.env` might look like:
+A minimal `~/arc/.env` for ARC Core could look like:
 
 ```env
 ARC_DIR=~/arc
-AGENT_WORKSPACE=~/arc/workspace
-LLM_MODEL_STORE=~/arc/models
 
-ARC_RUNTIME_PORT=7842
-ARC_RUNTIME_N_CTX=4096
-ARC_RUNTIME_N_BATCH=256
+SERVICE_RUNTIME_DIR=~/arc/runtime
+SERVICE_LOCK=~/arc/arc.lock
+SERVICE_CONFIG=~/arc/services.arc.yaml
+
+STRICT_ERRORS=1
+WAIT_ON_DEPENDENCIES=1
+MAX_UNHEALTHY_SERVICE_CHECKS=3
 
 LOG_LEVEL=INFO
+LOG_FILE=~/arc/arc.log
 LOG_CONSOLE=1
 LOG_JSON=0
-
-TELEGRAM_ENABLED=0
+LOG_ROTATE=1
+LOG_MAX_BYTES=10485760
+LOG_BACKUP_COUNT=2
 ```
 
-ARC reads these values into typed configuration constants used throughout the system.
+Values do not need to be present in `.env` when the built-in default is sufficient.
 
 ## How it works
 
 ```mermaid
 flowchart TD
-    OS["OS environment"] -->|takes precedence| API["Environment API"]
-    DOTENV["~/arc/.env"] -->|fills in the rest| API
-    API --> CONST["Typed ARC constants"]
-    CONST --> Paths
-    CONST --> Logging
-    CONST --> Runtime
-    CONST --> Permissions
-    CONST --> Integrations
+    OS["OS environment"] -->|takes precedence| ENV["ARC Environment API"]
+    DOTENV["~/arc/.env"] -->|fills missing values| ENV
+    ENV --> CONST["ARC Core constants"]
+
+    CONST --> SYSTEM["Core lifecycle"]
+    CONST --> PATHS["Core paths"]
+    CONST --> LOGGING["Logging"]
 ```
 
-ARC loads `.env` before evaluating configuration:
+ARC loads the `.env` file before evaluating the remaining configuration constants:
 
 ```python
 ENV_LOADED = load_dot_env()
 ```
 
-and uses `override=False`, preserving values already defined by the operating-system environment — matching the precedence shown above.
+The loader uses:
+
+```python
+load_dotenv(
+    ENV_PATH,
+    override=False,
+)
+```
+
+Therefore:
+
+```text
+OS environment
+      ↓
+   precedence
+      ↓
+~/arc/.env
+      ↓
+ARC Core defaults
+```
+
+More precisely, `.env` fills values that are not already provided by the OS environment, while the Python constants provide the final fallback defaults.
+
+## Path handling
+
+ARC Core uses `~/arc` as its default installation root.
+
+Paths beginning with `~/` are expanded using the `HOME` environment variable:
+
+```python
+ARC_DIR = path(
+    get_env("ARC_DIR", "~/arc")
+)
+```
+
+This allows the same configuration model to work without hard-coding a user's home directory.
+
+## Configuration API
+
+ARC Core provides helpers for reading typed environment values:
+
+```python
+get_env(...)
+get_env_str(...)
+get_env_bool(...)
+get_env_int(...)
+get_env_float(...)
+```
+
+The configuration layer also provides:
+
+```python
+set_env(...)
+```
+
+which can update values stored in `~/arc/.env`.
 
 ## Responsibilities
 
-Environment variables are responsible for:
+ARC Core environment variables are responsible for:
 
-* configuring ARC at startup
-* providing deployment-specific paths and settings
-* configuring logging and runtime behavior
-* enabling optional integrations
-* controlling permission-related settings
+* configuring Core startup behavior
+* defining Core-owned filesystem locations
+* configuring Pulse lifecycle behavior
+* configuring Core logging
+* providing deployment-specific Core settings
 
-The configuration layer can also update values stored in `~/arc/.env` through `set_env()`.
+Service-specific configuration should remain with the individual service rather than being added to Core constants.
 
 ## Not responsible for
 
-Environment variables are not:
+ARC Core environment variables are not the configuration mechanism for:
 
-* the service configuration system
-* persistent application state
-* the runtime API
-* a replacement for service definitions
+* inference engine settings
+* model paths or model parameters
+* service-specific ports
+* agent behavior
+* service-specific workspace paths
+* service-specific integrations
+* service implementation state
 
-They are the **configuration input layer** from which ARC derives its runtime settings.
+Those values belong to the corresponding service or component.
 
 ## Why it exists
 
-Environment-based configuration lets the same ARC installation run with different models, paths, ports, logging settings, runtime settings, permissions, and integrations — without modifying source code.
+Environment-based configuration allows ARC Core to use the same code across different installations while keeping installation paths, lifecycle behavior, and logging settings outside the source code.
+
+The global `.env` also gives the ARC installation a single shared environment that service processes inherit when they are started by Pulse.
 
 ## Related concepts
 
-* [Services](./SERVICES.md) — services consume ARC configuration via `ctx.env`
-* [Runtime](./RUNTIME.md) — model and inference configuration
-* [Configuration](./CONFIGURATION.md) — broader ARC configuration model
+* [Services](./SERVICES.md) — defines the ARC service model and service-level configuration.
+* [Forge](./FORGE.md) — installs services and manages `arc.lock` and service registration.
+* [Pulse](./PULSE.md) — uses Core lifecycle configuration to supervise services.
+* [Service Runner](./SERVICE-RUNNER.md) — executes services inside the ARC service runtime.

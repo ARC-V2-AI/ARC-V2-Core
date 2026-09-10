@@ -6,17 +6,17 @@ from pathlib import Path
 
 import tomli_w
 
-from arc.foundation.constants import ARC_SERVICE_RUNTIME_LOCK
+from arc.foundation.constants import SERVICE_LOCK
 
 
 class LockFile:
     def __init__(
         self,
-        path: str | Path = ARC_SERVICE_RUNTIME_LOCK,
+        path: str | Path = SERVICE_LOCK,
     ) -> None:
         self.path = Path(path)
 
-    def load(self) -> dict:
+    def load(self):
         if not self.path.exists():
             return {
                 "version": 1,
@@ -29,7 +29,7 @@ class LockFile:
 
     def upsert(
         self,
-        package: dict,
+        package,
     ) -> None:
         data = self.load()
 
@@ -62,7 +62,7 @@ class LockFile:
 
     def _write(
         self,
-        data: dict,
+        data,
     ) -> None:
         self.path.parent.mkdir(
             parents=True,

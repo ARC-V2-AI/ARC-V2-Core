@@ -79,7 +79,7 @@ class Service(ABC):
             f"Loading environment variables in {self.ctx.service_name}'s context..."
         )
         for key, value in self.ctx.env.items():
-            os.environ.setdefault(key, value)
+            _ = os.environ.setdefault(key, value)
 
     @property
     def info(self) -> ServiceInfo:
