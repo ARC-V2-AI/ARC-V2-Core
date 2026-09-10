@@ -24,28 +24,97 @@ class ForgeError(RuntimeError):
     """Base exception for Forge errors."""
 
 
+class ServiceNotFoundError(ForgeError):
+    pass
+
+
+class ServiceAlreadyInstalledError(ForgeError):
+    pass
+
+
+class InvalidServiceError(ForgeError):
+    pass
+
+
+class InstallationError(ForgeError):
+    pass
+
+
 class Forge:
     def __init__(
         self,
         runtime: VirtualEnvManager,
         lock: LockFile,
         services_config: Path,
+        autofix: bool = False,
     ) -> None:
         self.runtime: VirtualEnvManager = runtime
         self.lock: LockFile = lock
         self.services_config: Path = services_config
+        self._autofix: bool = autofix
 
         self.bootstrap: RuntimeBootstrap = RuntimeBootstrap(runtime)
 
+    def list(self) -> list[ServiceSpec]:
+        data = self.lock.load()
+
+        services: list[ServiceSpec] = []
+
+        for package in data.get("package", []):  # pyright: ignore[reportUnknownMemberType, reportGeneralTypeIssues]
+            if not isinstance(package, dict):
+                continue
+
+            service = package.get("service")
+
+            if not isinstance(service, dict):
+                continue
+
+            try:
+                services.append(
+                    ServiceSpec(
+                        id=service["id"],
+                        name=service.get(
+                            "name",
+                            package["name"],
+                        ),
+                        version=package["version"],
+                        package=package["name"],
+                        description=service.get(
+                            "description",
+                            "",
+                        ),
+                        module=service["module"],
+                        restart=service.get(
+                            "restart",
+                            "never",
+                        ),
+                        health=service.get(
+                            "health",
+                            "ignore",
+                        ),
+                        depends=service.get(
+                            "depends",
+                            [],
+                        ),
+                    )
+                )
+            except (KeyError, TypeError) as exc:
+                logger.warning(
+                    "Ignoring invalid service lock entry: %r (%s)",
+                    package,
+                    exc,
+                )
+
+        return sorted(
+            services,
+            key=lambda spec: spec.id,
+        )
+
     @classmethod
-    def from_env(cls):
+    def from_env(cls, autofix: bool = False):
         _runtime = VirtualEnvManager(SERVICE_RUNTIME_DIR)
         _lock = LockFile(SERVICE_LOCK)
-        return cls(_runtime, _lock, SERVICE_CONFIG)
-
-    # -------------------------------------------------------------------------
-    # Source handling
-    # -------------------------------------------------------------------------
+        return cls(_runtime, _lock, SERVICE_CONFIG, autofix)
 
     @staticmethod
     def _resolve_source(source: str | Path) -> ResolvedSource:
@@ -133,10 +202,6 @@ class Forge:
 
         raise ForgeError(f"Unsupported source type: {source.kind}")
 
-    # -------------------------------------------------------------------------
-    # Metadata
-    # -------------------------------------------------------------------------
-
     @staticmethod
     def _read_service_spec(
         project_dir: Path,
@@ -211,10 +276,6 @@ class Forge:
 
         return resolved, spec
 
-    # -------------------------------------------------------------------------
-    # Validation
-    # -------------------------------------------------------------------------
-
     @staticmethod
     def _validate_spec(
         spec: ServiceSpec,
@@ -242,10 +303,6 @@ class Forge:
         }:
             raise ForgeError(f"Invalid health policy for '{spec.id}': {spec.health}")
 
-    # -------------------------------------------------------------------------
-    # Installation target
-    # -------------------------------------------------------------------------
-
     @staticmethod
     def _install_target(
         source: ResolvedSource,
@@ -254,10 +311,6 @@ class Forge:
             raise ForgeError("No local project path available for installation.")
 
         return str(source.path)
-
-    # -------------------------------------------------------------------------
-    # Service configuration
-    # -------------------------------------------------------------------------
 
     def _load_services_config(self) -> dict[str, dict[Any, Any]] | dict[Any, Any]:
         if not self.services_config.exists():
@@ -310,7 +363,15 @@ class Forge:
         existing = services.get(spec.id)
 
         if existing is not None:
-            raise ForgeError(f"Service '{spec.id}' is already registered.")
+            if self._autofix:
+                self._remove_service_config(spec.id)
+                logger.warning(
+                    f"Removing old service config entry for service: {spec.name} | {spec.id}. Due to autofix."
+                )
+            else:
+                raise ForgeError(
+                    f"Service '{spec.id}' is already registered. To override run with --autofix"
+                )
 
         services[spec.id] = {
             "module": spec.module,
@@ -337,7 +398,7 @@ class Forge:
                     sort_keys=False,
                 )
 
-            temporary.replace(self.services_config)
+            _ = temporary.replace(self.services_config)
         except OSError as exc:
             temporary.unlink(missing_ok=True)
             raise ForgeError(f"Could not write service configuration: {exc}") from exc
@@ -377,10 +438,6 @@ class Forge:
             temporary.unlink(missing_ok=True)
             raise ForgeError(f"Could not update service configuration: {exc}") from exc
 
-    # -------------------------------------------------------------------------
-    # Lock
-    # -------------------------------------------------------------------------
-
     @staticmethod
     def _lock_record(
         spec: ServiceSpec,
@@ -406,6 +463,8 @@ class Forge:
             "source": source_data,
             "service": {
                 "id": spec.id,
+                "name": spec.name,
+                "description": spec.description,
                 "module": spec.module,
                 "restart": spec.restart,
                 "health": spec.health,
@@ -419,7 +478,7 @@ class Forge:
     ):
         data = self.lock.load()
 
-        for package in data.get("package", []):
+        for package in data.get("package", []):  # pyright: ignore[reportGeneralTypeIssues]
             service = package.get("service")
 
             if isinstance(service, dict) and service.get("id") == service_id:
@@ -427,17 +486,13 @@ class Forge:
 
         return None
 
-    # -------------------------------------------------------------------------
-    # Public API
-    # -------------------------------------------------------------------------
-
     def install(
         self,
         source: str | Path,
         *,
         editable: bool = False,
     ) -> ServiceSpec:
-        self.bootstrap.ensure()
+        self.bootstrap.ensure(self._autofix)
 
         resolved_source = self._resolve_source(source)
 
@@ -490,3 +545,10 @@ class Forge:
         self._remove_service_config(service_id)
 
         self.lock.remove(package_name)
+
+    def info(self, service_id: str) -> ServiceSpec:
+        for spec in self.list():
+            if spec.id == service_id:
+                return spec
+
+        raise ServiceNotFoundError(f"Service '{service_id}' is not installed.")

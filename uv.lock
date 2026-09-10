@@ -13,7 +13,7 @@ wheels = [
 
 [[package]]
 name = "arc-v2-core"
-version = "0.4.1"
+version = "0.4.2"
 source = { editable = "." }
 dependencies = [
     { name = "arc-v2-service-runner" },
@@ -22,6 +22,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
+    { name = "rich" },
     { name = "tomli" },
     { name = "tomli-w" },
     { name = "typing-extensions" },
@@ -36,6 +37,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.13.5" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "rich", specifier = ">=15.0.0" },
     { name = "tomli", specifier = ">=2.4.1" },
     { name = "tomli-w", specifier = ">=1.2.0" },
     { name = "typing-extensions", specifier = ">=4.16.0" },
@@ -44,8 +46,8 @@ requires-dist = [
 
 [[package]]
 name = "arc-v2-service-runner"
-version = "0.1.2"
-source = { git = "https://github.com/ARC-V2-AI/service-runner.git#f7560772cc41ab42aadb703507a3b3d46306b76c" }
+version = "0.1.3"
+source = { git = "https://github.com/ARC-V2-AI/service-runner.git#0feb5d393bf3d3d91f8380f855df46eb535075bf" }
 
 [[package]]
 name = "attrs"

@@ -37,7 +37,7 @@ class ConfigLoader:
                 )
 
             logger.warning(
-                f"Creating new empty 'services.arc.yaml' at: {_path} due to autofix"
+                f"Creating new empty 'services.arc.yaml' at: {_path}. Due to autofix."
             )
 
             _path.parent.mkdir(parents=True, exist_ok=True)

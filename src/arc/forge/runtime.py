@@ -56,8 +56,12 @@ class VirtualEnvManager:
                 f"{exc.stderr.strip()}"
             ) from exc
 
+    @property
+    def venv_exists(self):
+        return self.python.is_file()
+
     def create(self) -> None:
-        if self.python.is_file():
+        if self.venv_exists:
             return
 
         self._require_uv()
@@ -85,6 +89,15 @@ class VirtualEnvManager:
         )
 
         self._require_runtime()
+
+    def ensure_venv(self, autofix: bool = False):
+        if not self.venv_exists:
+            if autofix:
+                self.create()
+            else:
+                raise OSError(
+                    f"Runtime venv: '{self.python}' doese not exist or is not a file."
+                )
 
     def is_installed(self, package: str) -> bool:
         """Return whether a package is installed in the runtime venv."""
@@ -266,10 +279,10 @@ class RuntimeBootstrap:
         self,
         runtime: VirtualEnvManager,
     ) -> None:
-        self.runtime = runtime
+        self.runtime: VirtualEnvManager = runtime
 
-    def ensure(self) -> None:
-        self.runtime.create()
+    def ensure(self, autofix: bool = False) -> None:
+        self.runtime.ensure_venv(autofix)
 
         framework_version = version(SERVICE_RUNNER_PACKAGE)
 

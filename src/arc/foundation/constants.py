@@ -150,3 +150,26 @@ LOG_JSON = get_env_bool("LOG_JSON", _DEV["LOG_JSON"])
 LOG_ROTATE = get_env_bool("LOG_ROTATE", _DEV["LOG_ROTATE"])
 LOG_MAX_BYTES = get_env_int("LOG_MAX_BYTES", _DEV["LOG_MAX_BYTES"])
 LOG_BACKUP_COUNT = get_env_int("LOG_BACKUP_COUNT", _DEV["LOG_BACKUP_COUNT"])
+
+CONTROL_SOCKET = ARC_DIR / "arc.sock"
+
+
+def make_default_env() -> Path | None:
+    path = ENV_PATH
+
+    if path.exists():
+        return None
+
+    path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    content = "\n".join(f"{key}={value}" for key, value in _DEV.items()) + "\n"
+
+    _ = path.write_text(
+        content,
+        encoding="utf-8",
+    )
+
+    return path

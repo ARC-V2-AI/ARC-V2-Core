@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 from collections import defaultdict
 
 from arc_service.types import ProcessOutcome, ServiceStatus
 
 from arc.forge.runtime import RuntimeBootstrap, VirtualEnvManager
 from arc.foundation.constants import (
+    ARC_DIR,
     MAX_UNHEALTHY_SERVICE_CHECKS,
     WAIT_ON_DEPENDENCIES,
 )
@@ -17,6 +20,8 @@ from arc.pulse.manager import ServiceManager
 from arc.pulse.registry import ServiceRegistry
 
 logger = logging.getLogger(__name__)
+
+CONTROL_SOCKET = ARC_DIR / "arc.sock"
 
 RESTART_ALWAYS = "always"
 RESTART_ON_FAILURE = "on-failure"
@@ -30,7 +35,6 @@ HEALTH_ACTION_STOP = "stop"
 class Pulse:
     def __init__(self, autofix: bool) -> None:
         self._autofix = autofix
-
         self._service_registry = ServiceRegistry()
 
         self._runtime = VirtualEnvManager()
@@ -40,22 +44,134 @@ class Pulse:
             runtime_python=self._runtime.python,
         )
 
-        self._service_health_counter: defaultdict[
-            int,
-            int,
-        ] = defaultdict(int)
+        self._service_health_counter: defaultdict[int, int] = defaultdict(int)
+
+        self._control_server: asyncio.AbstractServer | None = None
 
     async def startup(
         self,
         wait_on_deps: bool = WAIT_ON_DEPENDENCIES,
     ) -> None:
-        RuntimeBootstrap(self._runtime).ensure()
+        RuntimeBootstrap(self._runtime).ensure(self._autofix)
 
         tree = ConfigLoader(self._autofix).run()
-
         self._service_registry.register_tree(tree)
 
+        await self._start_control_server()
+
         await self._service_manager.start_all(wait_on_deps)
+
+    async def _start_control_server(self) -> None:
+        CONTROL_SOCKET.parent.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
+
+        if CONTROL_SOCKET.exists():
+            CONTROL_SOCKET.unlink()
+
+        self._control_server = await asyncio.start_unix_server(
+            self._handle_control_client,
+            path=str(CONTROL_SOCKET),
+        )
+
+        os.chmod(CONTROL_SOCKET, 0o600)
+
+        logger.info(
+            "Pulse control socket listening at %s",
+            CONTROL_SOCKET,
+        )
+
+    async def _handle_control_client(
+        self,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        try:
+            data = await reader.readline()
+
+            if not data:
+                return
+
+            request = json.loads(data)
+
+            command = request.get("command")
+
+            if command == "status":
+                response = self._status_response()
+            elif command == "shutdown":
+                response = {
+                    "ok": True,
+                    "message": "Shutdown requested",
+                }
+
+                writer.write((json.dumps(response) + "\n").encode())
+                await writer.drain()
+
+                asyncio.create_task(self.shutdown())
+                return
+            else:
+                response = {
+                    "ok": False,
+                    "error": f"Unknown command: {command}",
+                }
+
+            writer.write((json.dumps(response) + "\n").encode())
+
+            await writer.drain()
+
+        except Exception as exc:
+            logger.exception("Control request failed")
+
+            response = {
+                "ok": False,
+                "error": str(exc),
+            }
+
+            try:
+                writer.write((json.dumps(response) + "\n").encode())
+                await writer.drain()
+            except (
+                BrokenPipeError,
+                ConnectionResetError,
+            ):
+                pass
+
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    def _status_response(self):
+        services = []
+
+        for service in self._service_registry.iter_startup_order():
+            process = service.process
+
+            status = None
+
+            if process is not None:
+                status = process
+
+            services.append(
+                {
+                    "id": service.config.name,
+                    "state": service.state.value,
+                    "pid": service.pid,
+                    "running": (process is not None and process.is_alive()),
+                    "started_at": (
+                        service.started_at.isoformat()
+                        if service.started_at is not None
+                        else None
+                    ),
+                    "restart_count": service.restart_count,
+                    "last_error": service.last_error,
+                }
+            )
+
+        return {
+            "ok": True,
+            "services": services,
+        }
 
     async def supervise(
         self,
@@ -69,7 +185,6 @@ class Pulse:
                 ):
                     continue
 
-                # First detect process exit.
                 outcome = self._service_manager.check(service)
 
                 if outcome is not None:
@@ -115,9 +230,7 @@ class Pulse:
 
                 self._service_health_counter[pid] += 1
 
-                checks = MAX_UNHEALTHY_SERVICE_CHECKS
-
-                if self._service_health_counter[pid] < checks:
+                if self._service_health_counter[pid] < MAX_UNHEALTHY_SERVICE_CHECKS:
                     continue
 
                 self._service_health_counter[pid] = 0
@@ -128,12 +241,10 @@ class Pulse:
                     status.healthy_reason,
                 )
 
-                policy = service.config.health
-
-                if policy == HEALTH_ACTION_RESTART:
+                if service.config.health == HEALTH_ACTION_RESTART:
                     await self._service_manager.restart(service)
 
-                elif policy == HEALTH_ACTION_STOP:
+                elif service.config.health == HEALTH_ACTION_STOP:
                     await self._service_manager.stop(service)
 
             await asyncio.sleep(poll_interval)
@@ -153,3 +264,11 @@ class Pulse:
 
     async def shutdown(self) -> None:
         await self._service_manager.stop_all()
+
+        if self._control_server is not None:
+            self._control_server.close()
+            await self._control_server.wait_closed()
+            self._control_server = None
+
+        if CONTROL_SOCKET.exists():
+            CONTROL_SOCKET.unlink(missing_ok=True)

@@ -1,7 +1,7 @@
 import asyncio
 import logging
 
-from arc.foundation.constants import ENV_LOADED
+from arc.foundation.constants import ENV_LOADED, make_default_env
 from arc.foundation.logger import setup_logging
 from arc.pulse.pulse import Pulse
 
@@ -11,7 +11,10 @@ async def main(autofix: bool = False) -> None:
     logger = logging.getLogger("boot")
 
     if not ENV_LOADED:
-        logger.warning("ARC .env not found. Using default configuration.")
+        logger.warning("ARC '.env' not found. Using default configuration.")
+        if autofix:
+            _path = make_default_env()
+            logger.info(f"Wrote default configuration to: {_path}. Due to autofix.")
 
     pulse = Pulse(autofix)
 

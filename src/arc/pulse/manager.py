@@ -164,10 +164,11 @@ class ServiceManager:
             return None
 
         if result.outcome is ProcessOutcome.STOPPED:
-            service.state = ServiceState.FAILED
+            service.state = ServiceState.STOPPED
 
         elif result.outcome is ProcessOutcome.CRASHED:
             service.state = ServiceState.FAILED
+            service.last_error = result.traceback or result.error
 
             logger.error(
                 "Service '%s' crashed: %s",
@@ -183,7 +184,13 @@ class ServiceManager:
                 )
 
         elif result.outcome is ProcessOutcome.CANCELLED:
-            service.state = ServiceState.FAILED
+            service.state = ServiceState.STOPPED
+
+        # The process has exited. Detach it so the same result
+        # is not processed again by the supervisor.
+        process.close()
+        service.process = None
+        service.pid = None
 
         return result.outcome
 
