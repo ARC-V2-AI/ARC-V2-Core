@@ -45,7 +45,7 @@ async def remove(
 
 @app.command
 def list() -> None:
-    forge = Forge.from_defaults()
+    forge = Forge.from_env()
 
     for spec in forge.list_installed():
         print(f"{spec.id:<20} {spec.version}")
@@ -55,7 +55,7 @@ def list() -> None:
 def info(
     service_id: str,
 ) -> None:
-    forge = Forge.from_defaults()
+    forge = Forge.from_env()
 
     spec = forge.info(service_id)
 
