@@ -1,0 +1,73 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+
+[project]
+name = "arc-v2"
+version = "0.3.0"
+description = "A Linux-native AI system inspired by operating system architecture, built to give an intelligent agent unified access to system capabilities."
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "arc-inference",
+    "croniter>=6.2.4",
+    "cyclopts>=4.22.5",
+    "ddgs>=9.16.0",
+    "fastapi[standard]>=0.141.1",
+    "flask>=3.1.3",
+    "gguf>=0.19.0",
+    "jinja2>=3.1.6",
+    "llama-cpp-python==0.3.35",
+    "openai>=2.52.1",
+    "pillow>=12.3.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "python-dotenv>=1.2.2",
+    "python-telegram-bot>=22.8",
+    "pyyaml>=6.0.3",
+    "textual>=8.2.8",
+    "tomli>=2.4.1",
+    "tomli-w>=1.2.0",
+    "typing-extensions>=4.16.0",
+    "uvicorn>=0.52.1",
+]
+
+[project.scripts]
+arc = "arc.cli.main:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/arc"]
+
+[tool.uv.extra-build-variables]
+llama-cpp-python = { CMAKE_ARGS = "-DGGML_CUDA=on" }
+
+[tool.uv.sources]
+arc-inference = { git = "https://github.com/PauWol/ARC-V2-Inference.git" }
+
+[tool.uv.workspace]
+members = [
+    "sandbox-llm",
+]
+
+[tool.basedpyright]
+reportAny = false
+reportExplicitAny = false
+
+authors = [{ name = "Paul" }]
+
+keywords = [
+    "ai",
+    "local-ai",
+    "local-llm",
+    "operating-environment",
+    "service-orchestration",
+    "runtime",
+]
+
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Operating System :: POSIX :: Linux",
+]

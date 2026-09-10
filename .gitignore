@@ -1,0 +1,20 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+
+# End to end test assets
+exe_tests/
+
+# IDE
+.vscode/
+
+# Inspiration / reference code
+inspo_code/

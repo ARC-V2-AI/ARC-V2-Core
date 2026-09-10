@@ -1,0 +1,17 @@
+services:
+
+  runtime:
+    module: arc.services.runtime.main
+    restart: on-failure
+    health: stop
+
+# Uncomment this for testing the STRICT_ERRORS functionality
+#  fail_test:
+#    module: arc.services.fail_test.main.FailTestService
+
+# TODO: If functional uncomment
+#  kernel:
+#    module: arc.services.kernel.main
+#    restart: always
+#    depends:
+#      - runtime
