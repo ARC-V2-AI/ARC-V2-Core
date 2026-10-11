@@ -1,30 +1,13 @@
-import os
 from pathlib import Path
 from typing import TypeVar
 
+from arc_v2_util.constants import Constant
 from dotenv import load_dotenv
 
 T = TypeVar("T")
 
 
-def path(p: str | Path) -> Path:
-    """Return a Path with '~' expanded reliably."""
-    p = Path(p)
-
-    if not str(p).startswith("~/"):
-        return p
-
-    home = os.environ.get("HOME")
-
-    if not home:
-        raise RuntimeError(
-            "Could not determine 'HOME' directory. Please add 'HOME' to env!"
-        )
-
-    return Path(home) / Path(*p.parts[1:])
-
-
-ENV_PATH = path("~/arc/.env")
+ENV_PATH = Constant(default="~/arc/.env", type=str).to_path()
 
 
 def load_dot_env() -> bool:
@@ -47,38 +30,6 @@ def load_dot_env() -> bool:
 ENV_LOADED = load_dot_env()
 
 
-def get_env(key: str, default: T) -> str | T:
-    """
-    Return an environment variable or a default value.
-    """
-    return os.getenv(key, default)
-
-
-def get_env_str(key: str, default: str) -> str:
-    return os.getenv(key, default)
-
-
-def get_env_bool(key: str, default: str = "false") -> bool:
-    value = os.getenv(key)
-    if value is None:
-        value = default
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-def get_env_int(key: str, default: str) -> int:
-    value = os.getenv(key)
-    if value is None:
-        value = default
-    return int(value)
-
-
-def get_env_float(key: str, default: str) -> float:
-    value = os.getenv(key)
-    if value is None:
-        value = default
-    return float(value)
-
-
 def set_env(key: str, value: T):  # pyright: ignore[reportInvalidTypeVarUse]
     _path = ENV_PATH
     _path.parent.mkdir(parents=True, exist_ok=True)
@@ -98,7 +49,7 @@ def set_env(key: str, value: T):  # pyright: ignore[reportInvalidTypeVarUse]
     _ = _path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-DEFAULT_DOT_ENV = {
+_DEV = {
     "TERMINAL_NO_COLOR": "0",
     "PYTHONUNBUFFERED": "1",
     "STRICT_ERRORS": "1",
@@ -121,35 +72,34 @@ DEFAULT_DOT_ENV = {
     # ---
 }
 
-_DEV = DEFAULT_DOT_ENV
-
 # System
-TERMINAL_NO_COLOR = get_env_bool("TERMINAL_NO_COLOR", _DEV["TERMINAL_NO_COLOR"])
-STRICT_ERRORS = get_env_bool("STRICT_ERRORS", _DEV["STRICT_ERRORS"])
-
-WAIT_ON_DEPENDENCIES = get_env_bool(
-    "WAIT_ON_DEPENDENCIES", _DEV["WAIT_ON_DEPENDENCIES"]
+TERMINAL_NO_COLOR = Constant(
+    default=_DEV["TERMINAL_NO_COLOR"], type=bool, auto_conversion=True
 )
-MAX_UNHEALTHY_SERVICE_CHECKS = get_env_int(
-    "MAX_UNHEALTHY_SERVICE_CHECKS", _DEV["MAX_UNHEALTHY_SERVICE_CHECKS"]
+STRICT_ERRORS = Constant(default=_DEV["STRICT_ERRORS"], type=bool, auto_conversion=True)
+WAIT_ON_DEPENDENCIES = Constant(
+    default=_DEV["WAIT_ON_DEPENDENCIES"], type=bool, auto_conversion=True
+)
+MAX_UNHEALTHY_SERVICE_CHECKS = Constant(
+    default=_DEV["MAX_UNHEALTHY_SERVICE_CHECKS"], type=int, auto_conversion=True
 )
 
 # Project Directories and file locations
-ARC_DIR = path(get_env("ARC_DIR", _DEV["ARC_DIR"]))
-SERVICE_LOCK = path(get_env_str("SERVICE_LOCK", _DEV["SERVICE_LOCK"]))
-SERVICE_CONFIG = path(get_env_str("SERVICE_CONFIG", _DEV["SERVICE_CONFIG"]))
-SERVICE_RUNTIME_DIR = path(
-    get_env_str("SERVICE_RUNTIME_DIR", _DEV["SERVICE_RUNTIME_DIR"])
-)
+ARC_DIR = Constant(default=_DEV["ARC_DIR"]).to_path()
+SERVICE_LOCK = Constant(default=_DEV["SERVICE_LOCK"]).to_path()
+SERVICE_CONFIG = Constant(default=_DEV["SERVICE_CONFIG"]).to_path()
+SERVICE_RUNTIME_DIR = Constant(default=_DEV["SERVICE_RUNTIME_DIR"]).to_path()
 
 # Logging
-LOG_LEVEL = get_env_str("LOG_LEVEL", _DEV["LOG_LEVEL"])
-LOG_FILE = path(get_env_str("LOG_FILE", _DEV["LOG_FILE"]))
-LOG_CONSOLE = get_env_bool("LOG_CONSOLE", _DEV["LOG_CONSOLE"])
-LOG_JSON = get_env_bool("LOG_JSON", _DEV["LOG_JSON"])
-LOG_ROTATE = get_env_bool("LOG_ROTATE", _DEV["LOG_ROTATE"])
-LOG_MAX_BYTES = get_env_int("LOG_MAX_BYTES", _DEV["LOG_MAX_BYTES"])
-LOG_BACKUP_COUNT = get_env_int("LOG_BACKUP_COUNT", _DEV["LOG_BACKUP_COUNT"])
+LOG_LEVEL = Constant(default=_DEV["LOG_LEVEL"])
+LOG_FILE = Constant(default=_DEV["LOG_FILE"]).to_path()
+LOG_CONSOLE = Constant(default=_DEV["LOG_CONSOLE"], type=bool, auto_conversion=True)
+LOG_JSON = Constant(default=_DEV["LOG_JSON"], type=bool, auto_conversion=True)
+LOG_ROTATE = Constant(default=_DEV["LOG_ROTATE"], type=bool, auto_conversion=True)
+LOG_MAX_BYTES = Constant(default=_DEV["LOG_MAX_BYTES"], type=int, auto_conversion=True)
+LOG_BACKUP_COUNT = Constant(
+    default=_DEV["LOG_BACKUP_COUNT"], type=int, auto_conversion=True
+)
 
 CONTROL_SOCKET = ARC_DIR / "arc.sock"
 
